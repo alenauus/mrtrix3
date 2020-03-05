@@ -163,7 +163,7 @@ template <class InType1, class InType2, class MaskType1, class MaskType2>
   }
 
 enum MetricType {MeanSquared, CrossCorrelation};
-const char* metric_choices[] = { "diff", "cc", NULL };
+const char* metric_choices[] = { "diff", "ncc", NULL };
 
 
 void usage ()
@@ -193,8 +193,8 @@ void usage ()
 
     + Option ("metric",
         "define the dissimilarity metric used to calculate the cost. "
-        "Choices: diff (squared differences), cc (normalised negative cross correlation). Default: diff). "
-        "cc is only implemented for -space average and -interp linear and cubic.")
+        "Choices: diff (squared differences), ncc (normalised negative cross correlation). Default: diff). "
+        "ncc is only implemented for -space average and -interp linear and cubic.")
     + Argument ("method").type_choice (metric_choices)
 
     + Option ("mask1", "mask for image 1")
@@ -245,10 +245,8 @@ void run ()
   if (input1.ndim() != input2.ndim())
     throw Exception ("both images have to have the same number of dimensions");
   DEBUG ("dimensions: " + str(dimensions));
-  if (dimensions > 4) throw Exception ("images have to be 3 or 4 dimensional");
-
-  if (dimensions != 3 and metric_type == MetricType::CrossCorrelation)
-    throw Exception ("CC metric requires 3D images");
+  if (dimensions < 3 | dimensions > 4)
+    throw Exception ("images have to be 3 or 4 dimensional");
 
   size_t volumes(1);
   if (dimensions == 4) {
@@ -381,7 +379,7 @@ void run ()
                                MaskInterpolatorType1,
                                MaskInterpolatorType2,
                                Image<default_type>,
-                               Interp::LinearInterp<ProcessedImageType, Interp::LinearInterpProcessingType::ValueAndDerivative>,
+                               Interp::LinearInterp<ProcessedImageType, Interp::LinearInterpProcessingType::Value>,
                                ProcessedMaskType,
                                Interp::Nearest<ProcessedMaskType>
                                >;
@@ -413,14 +411,14 @@ void run ()
                                MaskInterpolatorType1,
                                MaskInterpolatorType2,
                                ProcessedImageType,
-                               Interp::LinearInterp<ProcessedImageType, Interp::LinearInterpProcessingType::ValueAndDerivative>,
+                               Interp::LinearInterp<ProcessedImageType, Interp::LinearInterpProcessingType::Value>,
                                ProcessedMaskType,
                                Interp::Nearest<ProcessedMaskType>
                                >;
 
         ImageTypeM midway_image (midway_image_header);
 
-        Eigen::VectorXd gradient = Eigen::VectorXd::Zero(1);
+        Eigen::VectorXd gradient = Eigen::VectorXd::Zero(transform.size());
         // interp == 1 or 2, metric, dimensions, interp
         if (interp == 1 or interp == 2) {
           if ( metric_type == MetricType::MeanSquared ) {
@@ -453,19 +451,36 @@ void run ()
               } else { throw Exception ("Fixme: invalid metric choice "); }
             }
           } else if ( metric_type == MetricType::CrossCorrelation) {
-            Registration::Metric::GlobalCrossCorrelation metric;
-            if (interp == 1) {
-              LinearParamTypeWithGradient parameters (transform, input1, input2, midway_image, mask1, mask2);
-              metric.precompute (parameters);
-              Registration::Metric::ThreadKernel<decltype(metric), LinearParamTypeWithGradient> kernel
-                (metric, parameters, sos, gradient, &n_voxels);
-              ThreadedLoop (parameters.processed_image, 0, 3).run (kernel);
-            } else if (interp == 2) {
-              CubicParamTypeWithGradient parameters (transform, input1, input2, midway_image, mask1, mask2);
-              metric.precompute (parameters);
-              Registration::Metric::ThreadKernel<decltype(metric), CubicParamTypeWithGradient> kernel
-                (metric, parameters, sos, gradient, &n_voxels);
-              ThreadedLoop (parameters.processed_image, 0, 3).run (kernel);
+            if ( dimensions == 3 ) {
+              Registration::Metric::GlobalCrossCorrelation metric;
+              if (interp == 1) {
+                LinearParamTypeWithGradient parameters (transform, input1, input2, midway_image, mask1, mask2);
+                metric.precompute (parameters);
+                Registration::Metric::ThreadKernel<decltype(metric), LinearParamTypeWithGradient> kernel
+                  (metric, parameters, sos, gradient, &n_voxels);
+                ThreadedLoop (parameters.midway_image, 0, 3).run (kernel);
+              } else if (interp == 2) {
+                CubicParamTypeWithGradient parameters (transform, input1, input2, midway_image, mask1, mask2);
+                metric.precompute (parameters);
+                Registration::Metric::ThreadKernel<decltype(metric), CubicParamTypeWithGradient> kernel
+                  (metric, parameters, sos, gradient, &n_voxels);
+                ThreadedLoop (parameters.midway_image, 0, 3).run (kernel);
+              }
+            } else if ( dimensions == 4) {
+              Registration::Metric::GlobalCrossCorrelation4D metric;
+              if (interp == 1) {
+                LinearParamTypeWithGradient parameters (transform, input1, input2, midway_image, mask1, mask2);
+                metric.precompute (parameters);
+                Registration::Metric::ThreadKernel<decltype(metric), LinearParamTypeWithGradient> kernel
+                  (metric, parameters, sos, gradient, &n_voxels);
+                ThreadedLoop (parameters.midway_image, 0, 3).run (kernel);
+              } else if (interp == 2) {
+                CubicParamTypeWithGradient parameters (transform, input1, input2, midway_image, mask1, mask2);
+                metric.precompute (parameters);
+                Registration::Metric::ThreadKernel<decltype(metric), CubicParamTypeWithGradient> kernel
+                  (metric, parameters, sos, gradient, &n_voxels);
+                ThreadedLoop (parameters.midway_image, 0, 3).run (kernel);
+              }
             }
           }
       } else { // interp != 1 or 2 --> reslice and run voxel-wise comparison
