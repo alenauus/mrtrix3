@@ -29,7 +29,7 @@
 
 #include "transform.h"
 #include "registration/transform/rigid.h"
-#include "registration/metric/cross_correlation.h"
+#include "registration/metric/global_cross_correlation.h"
 #include "registration/metric/mean_squared.h"
 #include "registration/metric/params.h"
 #include "registration/metric/thread_kernel.h"
@@ -193,7 +193,7 @@ void usage ()
 
     + Option ("metric",
         "define the dissimilarity metric used to calculate the cost. "
-        "Choices: diff (squared differences), cc (non-normalised negative cross correlation aka negative cross covariance). Default: diff). "
+        "Choices: diff (squared differences), cc (normalised negative cross correlation). Default: diff). "
         "cc is only implemented for -space average and -interp linear and cubic.")
     + Argument ("method").type_choice (metric_choices)
 
@@ -339,8 +339,15 @@ void run ()
 
       using LinearInterpolatorType1 = Interp::LinearInterp<Image<value_type>, Interp::LinearInterpProcessingType::Value>;
       using LinearInterpolatorType2 = Interp::LinearInterp<Image<value_type>, Interp::LinearInterpProcessingType::Value>;
+      using LinearInterpolatorTypeWithGradient1 = Interp::LinearInterp<Image<value_type>, Interp::LinearInterpProcessingType::ValueAndDerivative>;
+      using LinearInterpolatorTypeWithGradient2 = Interp::LinearInterp<Image<value_type>, Interp::LinearInterpProcessingType::ValueAndDerivative>;
+
       using CubicInterpolatorType1 = Interp::SplineInterp<ImageType1, Math::UniformBSpline<typename ImageType1::value_type>, Math::SplineProcessingType::Value>;
       using CubicInterpolatorType2 = Interp::SplineInterp<ImageType2, Math::UniformBSpline<typename ImageType2::value_type>, Math::SplineProcessingType::Value>;
+      using CubicInterpolatorTypeWithGradient1 = Interp::SplineInterp<ImageType1, Math::UniformBSpline<typename ImageType1::value_type>, Math::SplineProcessingType::ValueAndDerivative>;
+      using CubicInterpolatorTypeWithGradient2 = Interp::SplineInterp<ImageType2, Math::UniformBSpline<typename ImageType2::value_type>, Math::SplineProcessingType::ValueAndDerivative>;
+
+
       using MaskInterpolatorType1 = Interp::Nearest<Image<bool>>;
       using MaskInterpolatorType2 = Interp::Nearest<Image<bool>>;
       using ProcessedImageType = Image<default_type>;
@@ -362,6 +369,22 @@ void run ()
                                ProcessedMaskType,
                                Interp::Nearest<ProcessedMaskType>
                                >;
+      using LinearParamTypeWithGradient = Registration::Metric::Params <
+                               Registration::Transform::Rigid,
+                               ImageType1,
+                               ImageType2,
+                               ImageTypeM,
+                               MaskType,
+                               MaskType,
+                               LinearInterpolatorTypeWithGradient1,
+                               LinearInterpolatorTypeWithGradient2,
+                               MaskInterpolatorType1,
+                               MaskInterpolatorType2,
+                               Image<default_type>,
+                               Interp::LinearInterp<ProcessedImageType, Interp::LinearInterpProcessingType::ValueAndDerivative>,
+                               ProcessedMaskType,
+                               Interp::Nearest<ProcessedMaskType>
+                               >;
       using CubicParamType = Registration::Metric::Params <
                                Registration::Transform::Rigid,
                                ImageType1,
@@ -378,6 +401,22 @@ void run ()
                                ProcessedMaskType,
                                Interp::Nearest<ProcessedMaskType>
                                >;
+      using CubicParamTypeWithGradient = Registration::Metric::Params <
+                               Registration::Transform::Rigid,
+                               ImageType1,
+                               ImageType2,
+                               ImageTypeM,
+                               MaskType,
+                               MaskType,
+                               CubicInterpolatorTypeWithGradient1,
+                               CubicInterpolatorTypeWithGradient2,
+                               MaskInterpolatorType1,
+                               MaskInterpolatorType2,
+                               ProcessedImageType,
+                               Interp::LinearInterp<ProcessedImageType, Interp::LinearInterpProcessingType::ValueAndDerivative>,
+                               ProcessedMaskType,
+                               Interp::Nearest<ProcessedMaskType>
+                               >;
 
         ImageTypeM midway_image (midway_image_header);
 
@@ -386,7 +425,7 @@ void run ()
         if (interp == 1 or interp == 2) {
           if ( metric_type == MetricType::MeanSquared ) {
             if ( dimensions == 3 ) {
-              Registration::Metric::MeanSquaredNoGradient  metric;
+              Registration::Metric::MeanSquaredNoGradient metric;
               if (interp == 1) {
                 LinearParamType parameters (transform, input1, input2, midway_image, mask1, mask2);
                 Registration::Metric::ThreadKernel<decltype(metric), LinearParamType> kernel
@@ -414,17 +453,17 @@ void run ()
               } else { throw Exception ("Fixme: invalid metric choice "); }
             }
           } else if ( metric_type == MetricType::CrossCorrelation) {
-            Registration::Metric::CrossCorrelationNoGradient metric;
+            Registration::Metric::GlobalCrossCorrelation metric;
             if (interp == 1) {
-              LinearParamType parameters (transform, input1, input2, midway_image, mask1, mask2);
+              LinearParamTypeWithGradient parameters (transform, input1, input2, midway_image, mask1, mask2);
               metric.precompute (parameters);
-              Registration::Metric::ThreadKernel<decltype(metric), LinearParamType> kernel
+              Registration::Metric::ThreadKernel<decltype(metric), LinearParamTypeWithGradient> kernel
                 (metric, parameters, sos, gradient, &n_voxels);
               ThreadedLoop (parameters.processed_image, 0, 3).run (kernel);
             } else if (interp == 2) {
-              CubicParamType parameters (transform, input1, input2, midway_image, mask1, mask2);
+              CubicParamTypeWithGradient parameters (transform, input1, input2, midway_image, mask1, mask2);
               metric.precompute (parameters);
-              Registration::Metric::ThreadKernel<decltype(metric), CubicParamType> kernel
+              Registration::Metric::ThreadKernel<decltype(metric), CubicParamTypeWithGradient> kernel
                 (metric, parameters, sos, gradient, &n_voxels);
               ThreadedLoop (parameters.processed_image, 0, 3).run (kernel);
             }
