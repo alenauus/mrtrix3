@@ -87,7 +87,7 @@ template <class InType1, class InType2, class MaskType1, class MaskType2>
                             bool use_mask1,
                             bool use_mask2,
                             ssize_t& n_voxels,
-                            Eigen::VectorXd& sos) {
+                            Eigen::VectorXd& cost) {
 
     using value_type = typename InType1::value_type;
 
@@ -98,7 +98,7 @@ template <class InType1, class InType2, class MaskType1, class MaskType2>
         for (auto i = Loop() (in1, in2, in1mask, in2mask); i ;++i)
           if (in1mask.value() and in2mask.value()) {
             ++n_voxels;
-            meansquared<value_type>(in1.value(), in2.value(), sos);
+            meansquared<value_type>(in1.value(), in2.value(), cost);
           }
       } else { // 4D
         Eigen::Matrix<value_type,Eigen::Dynamic,1> a (in1.size(3)), b (in2.size(3));
@@ -107,7 +107,7 @@ template <class InType1, class InType2, class MaskType1, class MaskType2>
             ++n_voxels;
             a = in1.row(3);
             b = in2.row(3);
-            meansquared<value_type>(a, b, sos);
+            meansquared<value_type>(a, b, cost);
           }
         }
       }
@@ -116,7 +116,7 @@ template <class InType1, class InType2, class MaskType1, class MaskType2>
         for (auto i = Loop() (in1, in2, in1mask); i ;++i)
           if (in1mask.value()){
             ++n_voxels;
-            meansquared<value_type>(in1.value(), in2.value(), sos);
+            meansquared<value_type>(in1.value(), in2.value(), cost);
           }
       } else { // 4D
         Eigen::Matrix<value_type,Eigen::Dynamic,1> a (in1.size(3)), b (in2.size(3));
@@ -125,7 +125,7 @@ template <class InType1, class InType2, class MaskType1, class MaskType2>
             ++n_voxels;
             a = in1.row(3);
             b = in2.row(3);
-            meansquared<value_type>(a, b, sos);
+            meansquared<value_type>(a, b, cost);
           }
         }
       }
@@ -134,7 +134,7 @@ template <class InType1, class InType2, class MaskType1, class MaskType2>
         for (auto i = Loop() (in1, in2, in2mask); i ;++i)
           if (in2mask.value()){
             ++n_voxels;
-            meansquared<value_type>(in1.value(), in2.value(), sos);
+            meansquared<value_type>(in1.value(), in2.value(), cost);
           }
       } else { // 4D
         Eigen::Matrix<value_type,Eigen::Dynamic,1> a (in1.size(3)), b (in2.size(3));
@@ -143,20 +143,20 @@ template <class InType1, class InType2, class MaskType1, class MaskType2>
             ++n_voxels;
             a = in1.row(3);
             b = in2.row(3);
-            meansquared<value_type>(a, b, sos);
+            meansquared<value_type>(a, b, cost);
           }
         }
       }
     } else {
       if (dimensions == 3) {
         for (auto i = Loop() (in1, in2); i ;++i)
-          meansquared<value_type>(in1.value(), in2.value(), sos);
+          meansquared<value_type>(in1.value(), in2.value(), cost);
       } else { // 4D
         Eigen::Matrix<value_type,Eigen::Dynamic,1> a (in1.size(3)), b (in2.size(3));
         for (auto i = Loop(0, 3) (in1, in2); i ;++i) {
           a = in1.row(3);
           b = in2.row(3);
-          meansquared<value_type>(a, b, sos);
+          meansquared<value_type>(a, b, cost);
         }
       }
     }
@@ -245,7 +245,7 @@ void run ()
   if (input1.ndim() != input2.ndim())
     throw Exception ("both images have to have the same number of dimensions");
   DEBUG ("dimensions: " + str(dimensions));
-  if (dimensions < 3 | dimensions > 4)
+  if ((dimensions < 3) || (dimensions > 4))
     throw Exception ("images have to be 3 or 4 dimensional");
 
   size_t volumes(1);
@@ -278,13 +278,13 @@ void run ()
 
   value_type out_of_bounds_value = 0.0;
 
-  Eigen::Matrix<value_type, Eigen::Dynamic, 1> sos = Eigen::Matrix<value_type, Eigen::Dynamic, 1>::Zero (volumes, 1);
+  Eigen::Matrix<value_type, Eigen::Dynamic, 1> cost = Eigen::Matrix<value_type, Eigen::Dynamic, 1>::Zero (volumes, 1);
   if (space==0) {
     INFO ("per-voxel");
     check_dimensions (input1, input2);
     if (!use_mask1 and !use_mask2)
       n_voxels = input1.size(0) * input1.size(1) * input1.size(2);
-    evaluate_voxelwise_msq (input1, input2, mask1, mask2, dimensions, use_mask1, use_mask2, n_voxels, sos);
+    evaluate_voxelwise_msq (input1, input2, mask1, mask2, dimensions, use_mask1, use_mask2, n_voxels, cost);
   } else {
     DEBUG ("scanner space");
     auto output1 = Header::scratch (input1, "-").get_image<value_type>();
@@ -305,7 +305,7 @@ void run ()
         if (use_mask2)
           Filter::reslice<Interp::Nearest> (mask2, output2mask, Adapter::NoTransform, Adapter::AutoOverSample, 0);
       }
-      evaluate_voxelwise_msq (output1, output2, output1mask, output2mask, dimensions, use_mask1, use_mask2, n_voxels, sos);
+      evaluate_voxelwise_msq (output1, output2, output1mask, output2mask, dimensions, use_mask1, use_mask2, n_voxels, cost);
     }
 
     if (space == 2) {
@@ -321,7 +321,7 @@ void run ()
           Filter::reslice<Interp::Nearest> (mask1, output1mask, Adapter::NoTransform, Adapter::AutoOverSample, 0);
       }
       n_voxels = input2.size(0) * input2.size(1) * input2.size(2);
-      evaluate_voxelwise_msq (output1, output2, output1mask, output2mask, dimensions, use_mask1, use_mask2, n_voxels, sos);
+      evaluate_voxelwise_msq (output1, output2, output1mask, output2mask, dimensions, use_mask1, use_mask2, n_voxels, cost);
     }
 
     if (space == 3) {
@@ -427,12 +427,12 @@ void run ()
               if (interp == 1) {
                 LinearParamType parameters (transform, input1, input2, midway_image, mask1, mask2);
                 Registration::Metric::ThreadKernel<decltype(metric), LinearParamType> kernel
-                  (metric, parameters, sos, gradient, &n_voxels);
+                  (metric, parameters, cost, gradient, &n_voxels);
                 ThreadedLoop (parameters.midway_image, 0, 3).run (kernel);
               } else if (interp == 2) {
                 CubicParamType parameters (transform, input1, input2, midway_image, mask1, mask2);
                 Registration::Metric::ThreadKernel<decltype(metric), CubicParamType> kernel
-                  (metric, parameters, sos, gradient, &n_voxels);
+                  (metric, parameters, cost, gradient, &n_voxels);
                 ThreadedLoop (parameters.midway_image, 0, 3).run (kernel);
               }
             } else if ( dimensions == 4) {
@@ -441,12 +441,12 @@ void run ()
               if (interp == 1) {
                 LinearParamType parameters (transform, input1, input2, midway_image, mask1, mask2);
                 Registration::Metric::ThreadKernel<decltype(metric), LinearParamType> kernel
-                  (metric, parameters, sos, gradient, &n_voxels);
+                  (metric, parameters, cost, gradient, &n_voxels);
                 ThreadedLoop (parameters.midway_image, 0, 3).run (kernel);
               } else if (interp == 2) {
                 CubicParamType parameters (transform, input1, input2, midway_image, mask1, mask2);
                 Registration::Metric::ThreadKernel<decltype(metric), CubicParamType> kernel
-                  (metric, parameters, sos, gradient, &n_voxels);
+                  (metric, parameters, cost, gradient, &n_voxels);
                 ThreadedLoop (parameters.midway_image, 0, 3).run (kernel);
               } else { throw Exception ("Fixme: invalid metric choice "); }
             }
@@ -457,13 +457,13 @@ void run ()
                 LinearParamTypeWithGradient parameters (transform, input1, input2, midway_image, mask1, mask2);
                 metric.precompute (parameters);
                 Registration::Metric::ThreadKernel<decltype(metric), LinearParamTypeWithGradient> kernel
-                  (metric, parameters, sos, gradient, &n_voxels);
+                  (metric, parameters, cost, gradient, &n_voxels);
                 ThreadedLoop (parameters.midway_image, 0, 3).run (kernel);
               } else if (interp == 2) {
                 CubicParamTypeWithGradient parameters (transform, input1, input2, midway_image, mask1, mask2);
                 metric.precompute (parameters);
                 Registration::Metric::ThreadKernel<decltype(metric), CubicParamTypeWithGradient> kernel
-                  (metric, parameters, sos, gradient, &n_voxels);
+                  (metric, parameters, cost, gradient, &n_voxels);
                 ThreadedLoop (parameters.midway_image, 0, 3).run (kernel);
               }
             } else if ( dimensions == 4) {
@@ -472,13 +472,13 @@ void run ()
                 LinearParamTypeWithGradient parameters (transform, input1, input2, midway_image, mask1, mask2);
                 metric.precompute (parameters);
                 Registration::Metric::ThreadKernel<decltype(metric), LinearParamTypeWithGradient> kernel
-                  (metric, parameters, sos, gradient, &n_voxels);
+                  (metric, parameters, cost, gradient, &n_voxels);
                 ThreadedLoop (parameters.midway_image, 0, 3).run (kernel);
               } else if (interp == 2) {
                 CubicParamTypeWithGradient parameters (transform, input1, input2, midway_image, mask1, mask2);
                 metric.precompute (parameters);
                 Registration::Metric::ThreadKernel<decltype(metric), CubicParamTypeWithGradient> kernel
-                  (metric, parameters, sos, gradient, &n_voxels);
+                  (metric, parameters, cost, gradient, &n_voxels);
                 ThreadedLoop (parameters.midway_image, 0, 3).run (kernel);
               }
             }
@@ -512,7 +512,7 @@ void run ()
             Filter::reslice<Interp::Nearest> (mask2, output2mask, Adapter::NoTransform, Adapter::AutoOverSample, 0);
         }
         n_voxels = output1.size(0) * output1.size(1) * output1.size(2);
-        evaluate_voxelwise_msq (output1, output2, output1mask, output2mask, dimensions, use_mask1, use_mask2, n_voxels, sos);
+        evaluate_voxelwise_msq (output1, output2, output1mask, output2mask, dimensions, use_mask1, use_mask2, n_voxels, cost);
       }
     } // "average space"
   }
@@ -521,8 +521,8 @@ void run ()
     WARN("number of overlapping voxels is zero");
 
   if (!nonormalisation)
-    sos.array() /= static_cast<value_type>(n_voxels);
-  std::cout << str(sos.transpose());
+    cost.array() /= static_cast<value_type>(n_voxels);
+  std::cout << str(cost.transpose());
 
   if (get_options ("overlap").size())
     std::cout << " " << str(n_voxels);
