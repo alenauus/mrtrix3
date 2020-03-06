@@ -23,6 +23,8 @@
 #include "image_helpers.h"
 #include "transform.h"
 
+#define MIN_VALUE_THRESHOLD 1.e-7
+
 namespace MR
 {
     namespace Registration
@@ -103,9 +105,7 @@ namespace MR
                         default_type smm = global_smm - (global_sm * global_sm / global_count);
                         default_type sfm = global_sfm - (global_sf * global_sm / global_count);
                         global_gncc = -1.0 * sfm / sqrt(sff * smm);
-
                     }
-
                 }
 
                 void operator() (const Iterator& iter) {
@@ -145,16 +145,12 @@ namespace MR
                     Eigen::Matrix<typename ParamType::Im1ValueType, 1, 3> grad1;
                     Eigen::Matrix<typename ParamType::Im2ValueType, 1, 3> grad2;
 
-                    params.im1_image_interp->value_and_gradient_wrt_scanner(im1_value, grad1);
+                    params.im1_image_interp->value_and_gradient_wrt_scanner(im1_value, grad1);  // TODO gradient not needed
+                    if (std::isnan (default_type (im1_value)) || abs(im1_value) < MIN_VALUE_THRESHOLD)
+                        return;
+
                     params.im2_image_interp->value_and_gradient_wrt_scanner(im2_value, grad2);
-
-                    if (std::isnan (default_type (im1_value)))
-                        return;
-
-                    if (std::isnan (default_type (im2_value)))
-                        return;
-
-                    if (abs(im1_value) < 1.e-7 || abs(im2_value) < 1.e-7)
+                    if (std::isnan (default_type (im2_value)) || abs(im2_value) < MIN_VALUE_THRESHOLD)
                         return;
 
                     local_sf += im1_value;
@@ -198,11 +194,19 @@ namespace MR
                 type_trait to distinguish metric types that require a call to precompute before the operator() is called */
                 using requires_precompute = int;
 
-                GlobalCrossCorrelation ( ) : weighted (false), min_value_threshold (1.e-7) {}
+                GlobalCrossCorrelation ( ) : weighted (false), min_value_threshold (MIN_VALUE_THRESHOLD) {}
 
                 void set_weights (Eigen::VectorXd weights) {
                     mc_weights = weights;
                     weighted = mc_weights.rows() > 0;
+                }
+
+                default_type get_cost() const {
+                    return computed_global_cost * computed_total_count;
+                }
+
+                default_type get_count() const {
+                    return computed_total_count;
                 }
 
 
@@ -241,8 +245,7 @@ namespace MR
                     computed_sfm = sfm - sf * sm / total_count;
                     computed_global_cost = gncc;
 
-                    return 0.0;
-
+                    return computed_global_cost;
                 }
 
                 template <class Params>
@@ -257,15 +260,15 @@ namespace MR
                     Eigen::Matrix<typename Params::Im1ValueType, 1, 3> im1_grad;
                     Eigen::Matrix<typename Params::Im2ValueType, 1, 3> im2_grad;
 
+                    if (std::isnan (computed_global_cost) || computed_total_count < 1 || (computed_smm * computed_sff) < min_value_threshold)
+                        return 0.0;
+
                     params.im1_image_interp->value_and_gradient_wrt_scanner (im1_value, im1_grad);
-                    if (std::isnan (default_type (im1_value)))
+                    if (std::isnan (default_type (im1_value)) || abs(im1_value) < min_value_threshold)
                         return 0.0;
 
                     params.im2_image_interp->value_and_gradient_wrt_scanner (im2_value, im2_grad);
-                    if (std::isnan (default_type (im2_value)))
-                        return 0.0;
-
-                    if (std::isnan (default_type (computed_global_cost)))
+                    if (std::isnan (default_type (im2_value)) || abs(im2_value) < min_value_threshold)
                         return 0.0;
 
                     if (params.im2_mask_interp) {
@@ -282,25 +285,17 @@ namespace MR
 
                     const auto jacobian_vec = params.transformation.get_jacobian_vector_wrt_params (midway_point);
 
-                    if (computed_total_count < 1 || (computed_smm * computed_sff) < min_value_threshold)
-                        return 0.0;
-
-                    if (abs(im1_value) < min_value_threshold || abs(im2_value) < min_value_threshold)
-                        return 0.0;
-
                     Eigen::Vector3d g1 = (im1_value - computed_sf / computed_total_count) * im2_grad;
                     Eigen::Vector3d g2 = (im2_value - computed_sm / computed_total_count) * (computed_sfm / computed_smm) * im2_grad;
 
-                    const Eigen::Vector3d g = (g1 - g2) * (1.0 / ((computed_sff * computed_smm)));
+                    Eigen::Vector3d g = (g1 - g2) / (computed_sff * computed_smm);
 
                     gradient.segment<4>(0) += g(0) * jacobian_vec;
                     gradient.segment<4>(4) += g(1) * jacobian_vec;
                     gradient.segment<4>(8) += g(2) * jacobian_vec;
 
                     return computed_global_cost;
-
                 }
-
             };
 
 
@@ -398,13 +393,13 @@ namespace MR
                     if (params.im2_mask_interp) {
                         params.im2_mask_interp->scanner (im2_point);
                         if (params.im2_mask_interp->value() < 0.5)
-                        return;
+                            return;
                     }
 
                     if (params.im1_mask_interp) {
                         params.im1_mask_interp->scanner (im1_point);
                         if (params.im1_mask_interp->value() < 0.5)
-                        return;
+                            return;
                     }
 
                     Eigen::Matrix<typename ParamType::Im1ValueType, Eigen::Dynamic, 3> im1_grad;
@@ -421,7 +416,7 @@ namespace MR
                         im2_grad.resize (volumes, 3);
                     }
 
-                    params.im1_image_interp->value_and_gradient_row_wrt_scanner (im1_values, im1_grad);
+                    params.im1_image_interp->value_and_gradient_row_wrt_scanner (im1_values, im1_grad);  // TODO gradient not required
                     params.im2_image_interp->value_and_gradient_row_wrt_scanner (im2_values, im2_grad);
 
                     if (im1_values.hasNaN())
@@ -431,16 +426,14 @@ namespace MR
                         return;
 
                     for (ssize_t i = 0; i < volumes; ++i) {
-
-                        if (abs((default_type) im1_values[i]) > 0.0 && abs((default_type) im2_values[i]) > 0.0) {
-
-                            local_count[i]++;
-                            local_sf[i] = local_sf[i] + im1_values[i];
-                            local_sm[i] = local_sm[i] + im2_values[i];
-                            local_sff[i] = local_sff[i] + im1_values[i] * im1_values[i];
-                            local_smm[i] = local_smm[i] + im2_values[i] * im2_values[i];
-                            local_sfm[i] = local_sfm[i] + im1_values[i] * im2_values[i];
-                        }
+                        if (abs(im1_values[i]) < MIN_VALUE_THRESHOLD || abs(im2_values[i]) < MIN_VALUE_THRESHOLD)
+                            continue;
+                        local_count[i]++;
+                        local_sf[i] = local_sf[i] + im1_values[i];
+                        local_sm[i] = local_sm[i] + im2_values[i];
+                        local_sff[i] = local_sff[i] + im1_values[i] * im1_values[i];
+                        local_smm[i] = local_smm[i] + im2_values[i] * im2_values[i];
+                        local_sfm[i] = local_sfm[i] + im1_values[i] * im2_values[i];
                     }
 
                     return;
@@ -477,10 +470,9 @@ namespace MR
                 type_trait to distinguish metric types that require a call to precompute before the operator() is called */
                 using requires_precompute = int;
 
-                GlobalCrossCorrelation4D ( ) : weighted (false), weight_sum (0.0), min_value_threshold (1.e-7) { }
+                GlobalCrossCorrelation4D ( ) : weighted (false), weight_sum (0.0), min_value_threshold (MIN_VALUE_THRESHOLD) { }
 
                 void set_weights (Eigen::VectorXd weights) {
-
                     if (mc_weights.rows() != weights.rows()) {
                         mc_weights.resize (weights.rows());
                     }
@@ -492,7 +484,14 @@ namespace MR
                     if (mc_weights.rows() > 0) {
                         weight_sum = mc_weights.sum();
                     }
+                }
 
+                Eigen::VectorXd get_cost() const {
+                    return computed_gncc * computed_count;
+                }
+
+                Eigen::VectorXd get_count() const {
+                    return computed_count;
                 }
 
 
@@ -530,27 +529,22 @@ namespace MR
                     ThreadedLoop (params.midway_image, 0, 3).run (compute_gncc);
 
                     for (ssize_t i = 0; i < volumes; ++i) {
-
                         if (computed_count[i] > 0) {
-
                             computed_sff[i]  = computed_sff[i] - (computed_sf[i] * computed_sf[i] / computed_count[i]);
                             computed_smm[i] = computed_smm[i] - (computed_sm[i] * computed_sm[i] / computed_count[i]);
                             computed_sfm[i]= computed_sfm[i] - (computed_sf[i] * computed_sm[i] / computed_count[i]);
                             computed_gncc[i] = -1.0 * computed_sfm[i] / sqrt(computed_sff[i] * computed_smm[i]);
-
                         }
                     }
 
                     for (ssize_t i = 0; i < volumes; ++i) {
-
                         if (computed_count[i] > 0) {
-                            computed_global_cost = computed_global_cost + computed_gncc[i];
-                            computed_total_count = computed_total_count + computed_count[i];
+                            computed_global_cost += computed_gncc[i];
+                            computed_total_count += computed_count[i];
                         }
                     }
 
-                    return 0.0;
-
+                    return computed_global_cost;
                 }
 
 
@@ -605,8 +599,7 @@ namespace MR
                     const auto jacobian_vec = params.transformation.get_jacobian_vector_wrt_params (midway_point);
 
                     for (ssize_t i = 0; i < volumes; ++i) {
-
-                        if (abs((default_type) im1_values[i]) > min_value_threshold || abs((default_type) im2_values[i]) > min_value_threshold) {
+                        if (abs((default_type) im1_values[i]) > min_value_threshold && abs((default_type) im2_values[i]) > min_value_threshold) {
 
                             if ( computed_count[i] > 1 && (computed_smm[i]*computed_sff[i]) > min_value_threshold) {
 
@@ -617,12 +610,11 @@ namespace MR
                                 if (this->weighted)
                                     current_volume_weight = ((default_type) this->mc_weights(i)) / ((default_type) this->mc_weights.sum());
 
-                                const Eigen::Vector3d g = current_volume_weight * (g1 - g2) * (computed_sfm[i] * computed_count[i] / ((computed_sff[i] * computed_smm[i])));
+                                const Eigen::Vector3d g = current_volume_weight * (g1 - g2) * (computed_sfm[i] * computed_count[i] / (computed_sff[i] * computed_smm[i]));
 
                                 gradient.segment<4>(0) += g(0) * jacobian_vec;
                                 gradient.segment<4>(4) += g(1) * jacobian_vec;
                                 gradient.segment<4>(8) += g(2) * jacobian_vec;
-
                             }
                         }
                     }
