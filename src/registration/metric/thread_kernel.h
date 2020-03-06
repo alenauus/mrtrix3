@@ -133,7 +133,7 @@ namespace MR
             int y_pos = (int) iter.index(1);
             int z_pos = (int) iter.index(2);
 
-            if ((x_pos % spacing == 0) && (y_pos % spacing == 0) && (z_pos % spacing == 0)) {
+            if (spacing <= 1 || ((x_pos % spacing == 0) && (y_pos % spacing == 0) && (z_pos % spacing == 0))) {
 
                 Eigen::Vector3 im2_point;
                 params.transformation.transform_half_inverse (im2_point, midway_point);
