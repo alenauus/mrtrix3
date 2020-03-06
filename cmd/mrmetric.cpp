@@ -456,30 +456,46 @@ void run ()
               if (interp == 1) {
                 LinearParamTypeWithGradient parameters (transform, input1, input2, midway_image, mask1, mask2);
                 metric.precompute (parameters);
+                cost[0] = metric.get_cost();
+                n_voxels = (ssize_t) metric.get_count();
+                VAR(cost[0]);
+                VAR(n_voxels);
+                cost[0] = 0;
+                n_voxels = 0;
                 Registration::Metric::ThreadKernel<decltype(metric), LinearParamTypeWithGradient> kernel
                   (metric, parameters, cost, gradient, &n_voxels);
                 ThreadedLoop (parameters.midway_image, 0, 3).run (kernel);
+                VAR(cost[0]);
+                VAR(n_voxels);
               } else if (interp == 2) {
                 CubicParamTypeWithGradient parameters (transform, input1, input2, midway_image, mask1, mask2);
                 metric.precompute (parameters);
-                Registration::Metric::ThreadKernel<decltype(metric), CubicParamTypeWithGradient> kernel
-                  (metric, parameters, cost, gradient, &n_voxels);
-                ThreadedLoop (parameters.midway_image, 0, 3).run (kernel);
+                cost[0] = metric.get_cost();
+                n_voxels = (ssize_t) metric.get_count();
               }
             } else if ( dimensions == 4) {
               Registration::Metric::GlobalCrossCorrelation4D metric;
               if (interp == 1) {
                 LinearParamTypeWithGradient parameters (transform, input1, input2, midway_image, mask1, mask2);
                 metric.precompute (parameters);
+                cost = metric.get_cost();
+                n_voxels = (ssize_t) metric.get_count().maxCoeff();
+                VEC(cost.transpose());
+                VEC(metric.get_count().transpose());
+                VAR(n_voxels);
+
+                cost.setZero();
+                n_voxels = 0;
                 Registration::Metric::ThreadKernel<decltype(metric), LinearParamTypeWithGradient> kernel
                   (metric, parameters, cost, gradient, &n_voxels);
                 ThreadedLoop (parameters.midway_image, 0, 3).run (kernel);
+                VEC(cost.transpose());
+                VAR(n_voxels);
               } else if (interp == 2) {
                 CubicParamTypeWithGradient parameters (transform, input1, input2, midway_image, mask1, mask2);
                 metric.precompute (parameters);
-                Registration::Metric::ThreadKernel<decltype(metric), CubicParamTypeWithGradient> kernel
-                  (metric, parameters, cost, gradient, &n_voxels);
-                ThreadedLoop (parameters.midway_image, 0, 3).run (kernel);
+                cost = metric.get_cost();
+                n_voxels = (ssize_t) metric.get_count().maxCoeff();
               }
             }
           }
